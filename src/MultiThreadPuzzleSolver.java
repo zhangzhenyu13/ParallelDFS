@@ -137,150 +137,176 @@ class MyPuzzle implements Puzzle{
 
 public class MultiThreadPuzzleSolver {
     private final Puzzle puzzle;
-    Vector<PuzzleNode> open=new Vector<>();
-    Vector<PuzzleNode> close=new Vector<>();
-    Boolean foundGoal=Boolean.FALSE;
+    Vector<PuzzleNode> open = new Vector<>();
+    Vector<PuzzleNode> close = new Vector<>();
+    Boolean foundGoal = Boolean.FALSE;
+    PuzzleNode GoalNode = null;
 
-    final Integer MaxThread=10;
-    private Vector<subSolver> solvers=new Vector<>();
+    final Integer MaxThread = 10;
+    Integer solversCount=0;
+    private Vector<subSolver> solvers = new Vector<>();
 
-    public MultiThreadPuzzleSolver(Puzzle puzzle){
-        this.puzzle=puzzle;
+    public MultiThreadPuzzleSolver(Puzzle puzzle) {
+        this.puzzle = puzzle;
     }
 
     class subSolver extends Thread {
-        PuzzleNode GoalNode = null;
         PuzzleNode node = null;
+        Vector<PuzzleNode> openT=new Vector<>();
+
 
         public subSolver(PuzzleNode node) {
+            openT.addAll(open);
+            openT.add(node);
+            System.out.println("thread "+this.getId()+" has "+openT.size()+" nodes to begin");
             this.node = node;
-            open.add(node);
+
 
         }
 
         @Override
         public void run() {
 
-            while (open.isEmpty() == false) {
-                synchronized (foundGoal){
-                    if(foundGoal)
+            while (openT.isEmpty() == false) {
+                synchronized (foundGoal) {
+                    if (foundGoal) {
+                        if(GoalNode!=null)
+                            break;
+
+                        foundGoal = Boolean.FALSE;
+                    }
+                    node = openT.get(0);
+                    openT.remove(0);
+                    System.out.println("search from node " + node+" in thread "+this.getId());
+                    if (puzzle.isGoal(node.pos)) {
+                        synchronized (foundGoal) {
+                            foundGoal = Boolean.TRUE;
+                            GoalNode = node;
+                        }
+                        System.out.println("found G " + node + " in thread " + this.getId());
+
                         break;
+                    }
+                    if (close.contains(node) && openT.contains(node))
+                        continue;
+
+                    Set<Move> nextMv = puzzle.legalMoves(node.pos);
+
+                    for (Move mv : nextMv) {
+                        Position pos = puzzle.move(node.pos, mv);
+                        //System.out.println("test add node "+pos);
+                        PuzzleNode puzzleNode = new PuzzleNode(pos, mv, node);
+                        if (close.contains(puzzleNode) || openT.contains(puzzleNode))
+                            continue;
+                        //System.out.println("add node" + puzzleNode);
+                        openT.add(0, puzzleNode);
+
+                    }
+                    close.add(node);
+                    //System.out.println("open size="+open.size()+",close size="+close.size());
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
                 }
+
+            }
+            solvers.remove(this);
+        }
+    }
+        public List<Move> solve() {
+            Position pos = puzzle.initialPosition();
+            return search(new PuzzleNode(pos, null, null));
+        }
+
+        private List<Move> search(PuzzleNode node) {
+
+            open.add(node);
+            while (open.isEmpty() == false||solvers.isEmpty()==false) {
+                synchronized (foundGoal) {
+                    if (foundGoal) {
+                        if(GoalNode!=null)
+                            return GoalNode.asMoveList();
+                        System.out.println("Not-->FoundGoal,Thread stop,left:"+solvers.size());
+                    }
+                    else
+                        foundGoal=Boolean.FALSE;
+                }
+
+                if(open.isEmpty()) {
+                    System.out.println("Main thread  wait");
+
+                    continue;
+                }
+
                 node = open.get(0);
                 open.remove(0);
-                System.out.println("search from node " + node);
+                System.out.println("search from node " + node+"in main thread");
                 if (puzzle.isGoal(node.pos)) {
                     synchronized (foundGoal) {
                         foundGoal = Boolean.TRUE;
-                        this.GoalNode = node;
+                        GoalNode=node;
                     }
-                    System.out.println("found G "+node+" in thread"+this.getId());
-
-                    break;
+                    System.out.println("found G " + node + " in main thread");
+                    return node.asMoveList();
                 }
                 if (close.contains(node) && open.contains(node))
                     continue;
 
                 Set<Move> nextMv = puzzle.legalMoves(node.pos);
 
+                LinkedList<PuzzleNode> nodes=new LinkedList<>();
                 for (Move mv : nextMv) {
                     Position pos = puzzle.move(node.pos, mv);
                     //System.out.println("test add node "+pos);
                     PuzzleNode puzzleNode = new PuzzleNode(pos, mv, node);
                     if (close.contains(puzzleNode) || open.contains(puzzleNode))
                         continue;
-                    System.out.println("add node" + puzzleNode);
-                    open.add(0, puzzleNode);
+
+                    if (solversCount < MaxThread) {
+                        solversCount += 1;
+
+                        System.out.println("add subsolver "+solversCount);
+                        subSolver solver = new subSolver(puzzleNode);
+                        solver.start();
+                        solvers.addElement(solver);
+                    }
+
+                    //System.out.println("add node" + puzzleNode);
+                    nodes.add(puzzleNode);
 
                 }
+
+                open.addAll(nodes);
+
                 close.add(node);
+
+
                 //System.out.println("open size="+open.size()+",close size="+close.size());
                 try {
-                    Thread.sleep(1000);
+                    Thread.sleep(100);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
             }
+            return null;
         }
 
-    }
-
-    public List<Move> solve() {
-        Position pos = puzzle.initialPosition();
-        return search(new PuzzleNode(pos, null, null));
-    }
-
-    private List<Move> search(PuzzleNode node) {
-
-        open.add(node);
-        while (open.isEmpty() == false) {
-            synchronized (foundGoal){
-                if(foundGoal){
-                    for(subSolver solver : solvers){
-                        if(solver.GoalNode!=null){
-                            return solver.GoalNode.asMoveList();
-                        }
-                    }
-                    System.out.println("Error-->FoundGoal");
-                }
-            }
-            node = open.get(0);
-            open.remove(0);
-            System.out.println("search from node " + node);
-            if (puzzle.isGoal(node.pos)) {
-                synchronized (foundGoal) {
-                    foundGoal = Boolean.TRUE;
-                }
-                System.out.println("found G "+node+" in main thread");
-                return node.asMoveList();
-            }
-            if (close.contains(node) && open.contains(node))
-                continue;
-
-            Set<Move> nextMv = puzzle.legalMoves(node.pos);
-
-            for (Move mv : nextMv) {
-                Position pos = puzzle.move(node.pos, mv);
-                //System.out.println("test add node "+pos);
-                PuzzleNode puzzleNode = new PuzzleNode(pos, mv, node);
-                if (close.contains(puzzleNode) || open.contains(puzzleNode))
-                    continue;
-                System.out.println("add node" + puzzleNode);
-                if(solvers.size()>MaxThread){
-                    open.add(puzzleNode);
-                    continue;
-                }
-                subSolver solver=new subSolver(puzzleNode);
-                solver.start();
-                solvers.addElement(solver);
-
-            }
-            close.add(node);
-            //System.out.println("open size="+open.size()+",close size="+close.size());
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+        public static void main(String[] args) {
+            MyPuzzle puzzle = new MyPuzzle("../data/MyMap.lay");
+            MultiThreadPuzzleSolver solver = new MultiThreadPuzzleSolver(puzzle);
+            List<Move> mvs = solver.solve();
+            if (mvs == null)
+                System.out.println("not found from from " + puzzle.initialPosition());
+            else {
+                for (Move mv : mvs)
+                    System.out.println("mv " + mv);
             }
         }
-
-
-        return null;
-    }
-    public static void main(String[] args){
-        MyPuzzle puzzle=new MyPuzzle("../data/MyMap.lay");
-        MultiThreadPuzzleSolver solver=new MultiThreadPuzzleSolver(puzzle);
-        List<Move> mvs=solver.solve();
-        if(mvs==null)
-            System.out.println("not found from from "+puzzle.initialPosition());
-        else {
-            for(Move mv:mvs)
-                System.out.println("mv "+mv);
-        }
-    }
-
 
 }
+
 
 
 
